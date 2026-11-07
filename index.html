@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0b1110">
+  <title>Playing Snake on Graphs</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="scripts.js" defer></script>
+</head>
+<body>
+  <div class="ambient ambient--one" aria-hidden="true"></div>
+  <div class="ambient ambient--two" aria-hidden="true"></div>
+
+  <div class="app-shell">
+    <header class="site-header">
+      <button class="brand" id="brand-home" type="button" aria-label="Return to home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>Snake<span class="brand-light">/</span>Graph</span>
+      </button>
+      <div class="header-meta">
+        <span class="offline-badge"><span class="status-dot"></span> Offline ready</span>
+        <span class="header-index">Research playground · 01</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="screen screen--active" id="home-screen" aria-labelledby="game-title">
+        <div class="home-hero">
+          <p class="eyebrow">GRAPH THEORY · TURN-BASED STRATEGY</p>
+          <h1 id="game-title">Playing Snake<br><span>on Graphs</span></h1>
+          <p class="subtitle">A Graph-Theoretic Strategy Game</p>
+          <p class="hero-copy">One player grows the snake. The other chooses where the journey begins—and where the next apple waits.</p>
+        </div>
+
+        <div class="setup-grid">
+          <form class="setup-panel" id="setup-form" novalidate>
+            <div class="panel-heading">
+              <span class="section-number">01</span>
+              <div><h2>Configure match</h2><p>Choose a ruleset and an opponent.</p></div>
+            </div>
+
+            <fieldset class="form-section">
+              <legend>Opponent</legend>
+              <div class="choice-grid choice-grid--two">
+                <label class="choice-card">
+                  <input type="radio" name="game-mode" value="hvh" checked>
+                  <span class="choice-content"><strong>Human vs Human</strong><small>Two players, one device</small></span>
+                  <span class="choice-check" aria-hidden="true"></span>
+                </label>
+                <label class="choice-card">
+                  <input type="radio" name="game-mode" value="hvc">
+                  <span class="choice-content"><strong>Human vs Computer</strong><small>Random Apple · BFS Snake</small></span>
+                  <span class="choice-check" aria-hidden="true"></span>
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset class="form-section" id="role-options" hidden>
+              <legend>Your role</legend>
+              <div class="segmented-control">
+                <label><input type="radio" name="human-role" value="snake" checked><span>Play as Snake</span></label>
+                <label><input type="radio" name="human-role" value="apple"><span>Play as Apple</span></label>
+              </div>
+            </fieldset>
+
+            <fieldset class="form-section">
+              <legend>Graph family</legend>
+              <div class="choice-grid choice-grid--three">
+                <label class="choice-card choice-card--compact">
+                  <input type="radio" name="graph-mode" value="general" checked>
+                  <span class="choice-content"><strong>General random</strong><small>Connected · seeded</small></span>
+                </label>
+                <label class="choice-card choice-card--compact">
+                  <input type="radio" name="graph-mode" value="research">
+                  <span class="choice-content"><strong>Research challenge</strong><small>No Hamiltonian cycle</small></span>
+                </label>
+                <label class="choice-card choice-card--compact">
+                  <input type="radio" name="graph-mode" value="theta">
+                  <span class="choice-content"><strong>Theta graph</strong><small>Three disjoint paths</small></span>
+                </label>
+              </div>
+            </fieldset>
+
+            <div class="form-section settings-section" id="general-options">
+              <div class="field-row">
+                <label class="field"><span>Vertex count</span><input id="vertex-count" type="number" min="6" max="16" value="10" inputmode="numeric"></label>
+                <label class="field" id="density-field"><span>Density</span><select id="graph-density"><option value="sparse">Sparse · 0.15</option><option value="medium" selected>Medium · 0.30</option><option value="dense">Dense · 0.55</option></select></label>
+              </div>
+            </div>
+
+            <div class="form-section settings-section" id="theta-options" hidden>
+              <div class="theta-heading"><span>Path lengths <small>(edges)</small></span><output id="theta-total">6 vertices</output></div>
+              <div class="field-row field-row--three">
+                <label class="field"><span>p</span><input id="theta-p" type="number" min="1" max="15" value="2" inputmode="numeric"></label>
+                <label class="field"><span>q</span><input id="theta-q" type="number" min="1" max="15" value="2" inputmode="numeric"></label>
+                <label class="field"><span>r</span><input id="theta-r" type="number" min="1" max="15" value="3" inputmode="numeric"></label>
+              </div>
+              <p class="field-note" id="theta-validation">Three paths share only their endpoints.</p>
+            </div>
+
+            <label class="field field--seed"><span>Random seed <small>optional</small></span><input id="seed-input" type="text" maxlength="64" placeholder="Leave blank to generate one" autocomplete="off" spellcheck="false"></label>
+            <p class="form-error" id="setup-error" role="alert"></p>
+            <button class="button button--primary button--start" type="submit"><span>Start game</span><span aria-hidden="true">→</span></button>
+          </form>
+
+          <aside class="rules-panel">
+            <div class="panel-heading">
+              <span class="section-number">02</span>
+              <div><h2>The objective</h2><p>Occupy every vertex to win.</p></div>
+            </div>
+            <ol class="rules-list">
+              <li><span class="rule-index">A</span><div><strong>Apple opens the match</strong><p>Choose the snake’s starting vertex, then place an apple on any unoccupied vertex.</p></div></li>
+              <li><span class="rule-index rule-index--snake">S</span><div><strong>Snake follows the edges</strong><p>Move one edge per turn. Eat to grow without moving your tail; never cross your body.</p></div></li>
+              <li><span class="rule-index">2n</span><div><strong>Every apple has a clock</strong><p>The snake must eat within twice the vertex count, or the Apple player wins.</p></div></li>
+            </ol>
+            <div class="research-note"><span class="note-line"></span><p>Explore exact graph properties and research-based classifications during every match.</p></div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="screen" id="game-screen" aria-label="Active game" hidden>
+        <div class="game-heading">
+          <div><p class="eyebrow" id="match-label">MATCH 01 · HUMAN VS HUMAN</p><h1>Follow the edges.<br><span>Fill the graph.</span></h1></div>
+          <div class="game-heading-meta"><span id="heading-graph-type">General random</span><code id="heading-seed">—</code></div>
+        </div>
+
+        <div class="game-layout">
+          <aside class="panel dashboard-panel" aria-label="Game dashboard">
+            <div class="turn-card" id="turn-card">
+              <p id="current-player">Player 1</p>
+              <h2 id="current-role">Apple’s turn</h2>
+              <span id="turn-instruction">Choose the starting vertex</span>
+            </div>
+
+            <div class="dashboard-section">
+              <h3>Match state</h3>
+              <dl class="stats-grid">
+                <div><dt>Snake length</dt><dd id="stat-length">0</dd></div>
+                <div><dt>Total vertices</dt><dd id="stat-vertices">—</dd></div>
+                <div><dt>Unoccupied</dt><dd id="stat-unoccupied">—</dd></div>
+                <div><dt>Apples eaten</dt><dd id="stat-apples">0</dd></div>
+                <div><dt>Apple position</dt><dd id="stat-apple-position">—</dd></div>
+                <div><dt>Total moves</dt><dd id="stat-total-moves">0</dd></div>
+              </dl>
+            </div>
+
+            <div class="dashboard-section move-budget">
+              <div class="budget-heading"><h3>Movement budget</h3><span><b id="stat-moves">0</b> / <span id="stat-max-moves">—</span></span></div>
+              <div class="progress-track" aria-hidden="true"><span id="moves-progress"></span></div>
+              <p>Moves used for the current apple</p>
+            </div>
+
+            <div class="dashboard-section match-meta">
+              <div><span>Graph mode</span><strong id="stat-graph-mode">—</strong></div>
+              <div><span>Random seed</span><code id="stat-seed">—</code></div>
+            </div>
+          </aside>
+
+          <section class="panel board-panel" aria-label="Graph board">
+            <div class="board-heading">
+              <div><span class="phase-badge" id="phase-badge">SETUP</span><h2 id="board-title">The graph awaits</h2></div>
+              <span class="board-hint" id="board-hint">Select any highlighted vertex</span>
+            </div>
+            <div class="graph-container" id="graph-container">
+              <svg id="graph-svg" viewBox="0 0 800 600" role="img" aria-labelledby="graph-title graph-description" preserveAspectRatio="xMidYMid meet">
+                <title id="graph-title">Game graph</title><desc id="graph-description">Interactive vertices connected by undirected edges.</desc>
+              </svg>
+            </div>
+            <div class="graph-feedback" id="graph-feedback" aria-live="polite">Apple selects the snake’s starting vertex.</div>
+            <div class="graph-legend" aria-label="Graph legend">
+              <span><i class="legend-dot legend-dot--head"></i>Head</span>
+              <span><i class="legend-dot legend-dot--body"></i>Body</span>
+              <span><i class="legend-dot legend-dot--tail"></i>Tail</span>
+              <span><i class="legend-dot legend-dot--apple"></i>Apple</span>
+              <span><i class="legend-line legend-line--snake"></i>Snake edge</span>
+              <span><i class="legend-line legend-line--occupied"></i>Occupied chord</span>
+              <span><i class="legend-ring"></i>Legal action</span>
+            </div>
+          </section>
+
+          <aside class="panel controls-panel" aria-label="Game controls">
+            <div class="controls-heading"><span class="section-number">03</span><div><h2>Match controls</h2><p>Take your time. Think in paths.</p></div></div>
+            <div class="control-buttons">
+              <button class="button button--control" id="pause-button" type="button"><span>Pause match</span><kbd>P</kbd></button>
+              <button class="button button--control" id="restart-button" type="button"><span>Restart match</span><span aria-hidden="true">↻</span></button>
+              <button class="button button--control" id="new-graph-button" type="button"><span>Generate new graph</span><span aria-hidden="true">＋</span></button>
+              <button class="button button--control" id="properties-button" type="button"><span>Graph properties</span><span aria-hidden="true">↗</span></button>
+              <button class="button button--control" id="home-button" type="button"><span>Return to home</span><span aria-hidden="true">←</span></button>
+            </div>
+
+            <details class="history-panel" id="history-panel">
+              <summary><span>Move history</span><span class="history-count" id="history-count">0</span></summary>
+              <ol class="history-list" id="history-list"></ol>
+            </details>
+            <div class="controls-tip"><strong>Quick pause</strong><p>Press <kbd>P</kbd> at any time. Computer actions pause too.</p></div>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer"><span>Playing Snake on Graphs</span><span>HTML5 · CSS3 · Vanilla JS · SVG</span></footer>
+  </div>
+
+  <div class="modal-backdrop pause-backdrop" id="pause-overlay" hidden>
+    <section class="modal pause-modal" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+      <p class="eyebrow">MATCH SUSPENDED</p><h2 id="pause-title">Paused between<br>possibilities.</h2><p>Your position is preserved. No human or computer actions can run while paused.</p>
+      <button class="button button--primary" id="resume-button" type="button">Resume match <span aria-hidden="true">→</span></button>
+    </section>
+  </div>
+
+  <div class="modal-backdrop" id="properties-modal" hidden>
+    <section class="modal properties-modal" role="dialog" aria-modal="true" aria-labelledby="properties-title">
+      <div class="modal-heading"><div><p class="eyebrow">EXACT GRAPH ANALYSIS</p><h2 id="properties-title">Graph properties</h2></div><button class="icon-button" id="close-properties" type="button" aria-label="Close graph properties">×</button></div>
+      <div id="properties-content"></div>
+    </section>
+  </div>
+
+  <div class="modal-backdrop" id="end-modal" hidden>
+    <section class="modal end-modal" role="dialog" aria-modal="true" aria-labelledby="result-title">
+      <p class="eyebrow">MATCH COMPLETE</p><div class="result-mark" id="result-mark" aria-hidden="true">S</div><h2 id="result-title">Snake Player Wins</h2><p class="result-reason" id="result-reason"></p>
+      <dl class="result-stats" id="result-stats"></dl>
+      <div class="result-actions">
+        <button class="button button--primary" id="replay-button" type="button">Play again on same graph</button>
+        <button class="button button--secondary" id="swap-button" type="button">Swap roles and replay</button>
+        <button class="button button--secondary" id="end-new-graph-button" type="button">Generate new graph</button>
+        <button class="button button--text" id="end-home-button" type="button">Return to home</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
