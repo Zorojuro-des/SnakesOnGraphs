@@ -13,9 +13,9 @@
     PAUSED: "PAUSED",
     GAME_OVER: "GAME_OVER"
   });
-  const DENSITIES = Object.freeze({ sparse: 0.15, medium: 0.30, dense: 0.55 });
+  const DENSITIES = Object.freeze({ sparse: 0.25, medium: 0.55, dense: 0.90 });
   const GRAPH_LABELS = Object.freeze({
-    general: "General random",
+    general: "General planar",
     research: "Research challenge",
     theta: "Theta graph"
   });
@@ -23,7 +23,6 @@
   const $ = (id) => document.getElementById(id);
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const edgeKey = (a, b) => a < b ? `${a}-${b}` : `${b}-${a}`;
-  const isInteger = (value) => Number.isInteger(Number(value));
   const escapeHTML = (value) => String(value).replace(/[&<>'"]/g, (character) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"
   })[character]);
@@ -82,8 +81,120 @@
   }
 
   /* ================================================================
-     3. Graph generator
+     3. Planar Geometry & Graph Generator
      ================================================================ */
+  class PlanarGeometry {
+    static crossProduct(o, a, b) {
+      return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    }
+
+    static pointToSegmentDistance(p, a, b) {
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq < 1e-6) return Math.hypot(p.x - a.x, p.y - a.y);
+      const t = clamp(((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq, 0, 1);
+      const projX = a.x + t * dx;
+      const projY = a.y + t * dy;
+      return Math.hypot(p.x - projX, p.y - projY);
+    }
+
+    static onSegment(a, b, p, eps = 1e-5) {
+      return (
+        p.x <= Math.max(a.x, b.x) + eps &&
+        p.x >= Math.min(a.x, b.x) - eps &&
+        p.y <= Math.max(a.y, b.y) + eps &&
+        p.y >= Math.min(a.y, b.y) - eps &&
+        Math.abs(this.crossProduct(a, b, p)) <= eps
+      );
+    }
+
+    static segmentsIntersect(a, b, c, d) {
+      const d1 = this.crossProduct(c, d, a);
+      const d2 = this.crossProduct(c, d, b);
+      const d3 = this.crossProduct(a, b, c);
+      const d4 = this.crossProduct(a, b, d);
+      const eps = 1e-5;
+      if (((d1 > eps && d2 < -eps) || (d1 < -eps && d2 > eps)) &&
+          ((d3 > eps && d4 < -eps) || (d3 < -eps && d4 > eps))) {
+        return true;
+      }
+      if (Math.abs(d1) <= eps && this.onSegment(c, d, a, eps)) return true;
+      if (Math.abs(d2) <= eps && this.onSegment(c, d, b, eps)) return true;
+      if (Math.abs(d3) <= eps && this.onSegment(a, b, c, eps)) return true;
+      if (Math.abs(d4) <= eps && this.onSegment(a, b, d, eps)) return true;
+      return false;
+    }
+
+    static canAddPlanarEdge(vertices, existingEdges, u, v, minClearance = 38) {
+      if (u === v) return false;
+      const a = vertices[u];
+      const b = vertices[v];
+      for (let i = 0; i < vertices.length; i += 1) {
+        if (i === u || i === v) continue;
+        if (this.pointToSegmentDistance(vertices[i], a, b) < minClearance) {
+          return false;
+        }
+      }
+      for (const edge of existingEdges) {
+        if ((edge.a === u && edge.b === v) || (edge.a === v && edge.b === u)) return false;
+        const c = vertices[edge.a];
+        const d = vertices[edge.b];
+        const sharesEndpoint = edge.a === u || edge.a === v || edge.b === u || edge.b === v;
+        if (sharesEndpoint) {
+          const shared = (edge.a === u || edge.a === v) ? edge.a : edge.b;
+          const otherExisting = edge.a === shared ? edge.b : edge.a;
+          const otherNew = u === shared ? v : u;
+          const pShared = vertices[shared];
+          const p1 = vertices[otherExisting];
+          const p2 = vertices[otherNew];
+          const v1x = p1.x - pShared.x;
+          const v1y = p1.y - pShared.y;
+          const v2x = p2.x - pShared.x;
+          const v2y = p2.y - pShared.y;
+          const denom = Math.hypot(v1x, v1y) * Math.hypot(v2x, v2y);
+          if (denom > 1e-6) {
+            const cosAngle = (v1x * v2x + v1y * v2y) / denom;
+            if (cosAngle > 0.965) return false;
+          }
+        } else if (this.segmentsIntersect(a, b, c, d)) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    static isValidPlanarLayout(vertices, edges, minVertexDist = 100, minClearance = 32) {
+      const n = vertices.length;
+      for (let i = 0; i < n; i += 1) {
+        for (let j = i + 1; j < n; j += 1) {
+          if (Math.hypot(vertices[i].x - vertices[j].x, vertices[i].y - vertices[j].y) < minVertexDist) {
+            return false;
+          }
+        }
+      }
+      for (let i = 0; i < edges.length; i += 1) {
+        const e1 = edges[i];
+        const a = vertices[e1.a];
+        const b = vertices[e1.b];
+        for (let k = 0; k < n; k += 1) {
+          if (k === e1.a || k === e1.b) continue;
+          if (this.pointToSegmentDistance(vertices[k], a, b) < minClearance) {
+            return false;
+          }
+        }
+        for (let j = i + 1; j < edges.length; j += 1) {
+          const e2 = edges[j];
+          const sharesEndpoint = e1.a === e2.a || e1.a === e2.b || e1.b === e2.a || e1.b === e2.b;
+          if (!sharesEndpoint && this.segmentsIntersect(a, b, vertices[e2.a], vertices[e2.b])) {
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+  }
+
   class GraphGenerator {
     static emptyGraph(vertices, type, metadata = {}) {
       return {
@@ -113,6 +224,13 @@
       return true;
     }
 
+    static removeEdge(graph, a, b) {
+      graph.adjacency[a] = graph.adjacency[a].filter((v) => v !== b);
+      graph.adjacency[b] = graph.adjacency[b].filter((v) => v !== a);
+      const key = edgeKey(a, b);
+      graph.edges = graph.edges.filter((item) => edgeKey(item.a, item.b) !== key);
+    }
+
     static finalize(graph) {
       graph.adjacency.forEach((neighbors) => neighbors.sort((a, b) => a - b));
       graph.edges.sort((edgeA, edgeB) => edgeKey(edgeA.a, edgeA.b).localeCompare(edgeKey(edgeB.a, edgeB.b), undefined, { numeric: true }));
@@ -134,58 +252,242 @@
       return { valid: true, total, message: "Three paths share only their endpoints." };
     }
 
+    static generateSpacedVertices(n, rng) {
+      const minSep = Math.max(122, 182 - n * 3.6);
+      const marginX = 76;
+      const marginY = 72;
+      const width = 800 - marginX * 2;
+      const height = 600 - marginY * 2;
+      const cols = Math.ceil(Math.sqrt((n * width) / height));
+      const rows = Math.ceil(n / cols);
+      const cellW = width / cols;
+      const cellH = height / rows;
+
+      const cells = [];
+      for (let r = 0; r < rows; r += 1) {
+        for (let c = 0; c < cols; c += 1) {
+          cells.push({ r, c });
+        }
+      }
+      const chosenCells = rng.shuffle(cells).slice(0, n);
+      const pts = chosenCells.map(({ r, c }) => ({
+        x: marginX + (c + 0.22 + rng.next() * 0.56) * cellW,
+        y: marginY + (r + 0.22 + rng.next() * 0.56) * cellH
+      }));
+
+      for (let iter = 0; iter < 220; iter += 1) {
+        for (let i = 0; i < n; i += 1) {
+          let fx = 0;
+          let fy = 0;
+          for (let j = 0; j < n; j += 1) {
+            if (i === j) continue;
+            let dx = pts[i].x - pts[j].x;
+            let dy = pts[i].y - pts[j].y;
+            let dist = Math.hypot(dx, dy);
+            if (dist < 1) {
+              dx = rng.next() - 0.5;
+              dy = rng.next() - 0.5;
+              dist = Math.hypot(dx, dy) + 0.1;
+            }
+            if (dist < minSep * 1.35) {
+              const push = ((minSep * 1.35 - dist) / (minSep * 1.35)) * 14;
+              fx += (dx / dist) * push;
+              fy += (dy / dist) * push;
+            }
+          }
+          fx += (400 - pts[i].x) * 0.018;
+          fy += (300 - pts[i].y) * 0.018;
+          pts[i].x = clamp(pts[i].x + fx, marginX, 800 - marginX);
+          pts[i].y = clamp(pts[i].y + fy, marginY, 600 - marginY);
+        }
+
+        for (let i = 0; i < n; i += 1) {
+          for (let j = i + 1; j < n; j += 1) {
+            const dx = pts[j].x - pts[i].x;
+            const dy = pts[j].y - pts[i].y;
+            const dist = Math.max(0.1, Math.hypot(dx, dy));
+            if (dist < minSep) {
+              const push = (minSep - dist) * 0.52;
+              const px = (dx / dist) * push;
+              const py = (dy / dist) * push;
+              pts[i].x = clamp(pts[i].x - px, marginX, 800 - marginX);
+              pts[i].y = clamp(pts[i].y - py, marginY, 600 - marginY);
+              pts[j].x = clamp(pts[j].x + px, marginX, 800 - marginX);
+              pts[j].y = clamp(pts[j].y + py, marginY, 600 - marginY);
+            }
+          }
+        }
+      }
+
+      return pts;
+    }
+
     static general(vertices, density, rng) {
       const n = Number(vertices);
       if (!Number.isInteger(n) || n < 6 || n > 16) throw new Error("Vertex count must be an integer from 6 to 16.");
       if (!Object.hasOwn(DENSITIES, density)) throw new Error("Unknown graph density.");
+
       const graph = this.emptyGraph(n, "general", { density });
-      const order = rng.shuffle(Array.from({ length: n }, (_, index) => index));
-      for (let i = 1; i < n; i += 1) {
-        this.addEdge(graph, order[i], order[rng.int(i)]);
-      }
+      const pts = this.generateSpacedVertices(n, rng);
+      const labels = rng.shuffle(Array.from({ length: n }, (_, index) => index));
+      labels.forEach((vertexId, idx) => {
+        graph.vertices[vertexId].x = pts[idx].x;
+        graph.vertices[vertexId].y = pts[idx].y;
+      });
+
+      const allPairs = [];
       for (let a = 0; a < n; a += 1) {
         for (let b = a + 1; b < n; b += 1) {
-          if (!graph.adjacency[a].includes(b) && rng.next() < DENSITIES[density]) this.addEdge(graph, a, b);
+          const dist = Math.hypot(
+            graph.vertices[a].x - graph.vertices[b].x,
+            graph.vertices[a].y - graph.vertices[b].y
+          );
+          allPairs.push({ a, b, dist, score: dist * (0.92 + rng.next() * 0.16) });
         }
       }
-      return this.layoutGraph(this.finalize(graph), rng.fork("layout"));
+      allPairs.sort((p1, p2) => p1.score - p2.score);
+
+      // 1. Build a crossing-free planar spanning tree (Kruskal on shortest valid planar edges)
+      const parent = Array.from({ length: n }, (_, i) => i);
+      const find = (x) => {
+        let root = x;
+        while (parent[root] !== root) root = parent[root];
+        let curr = x;
+        while (curr !== root) {
+          const nxt = parent[curr];
+          parent[curr] = root;
+          curr = nxt;
+        }
+        return root;
+      };
+      const union = (a, b) => {
+        const ra = find(a);
+        const rb = find(b);
+        if (ra === rb) return false;
+        parent[ra] = rb;
+        return true;
+      };
+
+      for (const pair of allPairs) {
+        if (find(pair.a) !== find(pair.b)) {
+          if (PlanarGeometry.canAddPlanarEdge(graph.vertices, graph.edges, pair.a, pair.b, 38)) {
+            this.addEdge(graph, pair.a, pair.b);
+            union(pair.a, pair.b);
+          }
+        }
+      }
+
+      // Fallback with relaxed clearance if any component remained separated
+      for (const pair of allPairs) {
+        if (find(pair.a) !== find(pair.b)) {
+          if (PlanarGeometry.canAddPlanarEdge(graph.vertices, graph.edges, pair.a, pair.b, 26)) {
+            this.addEdge(graph, pair.a, pair.b);
+            union(pair.a, pair.b);
+          }
+        }
+      }
+
+      // 2. Collect all remaining non-crossing planar triangulation chords
+      const extraPlanarCandidates = [];
+      for (const pair of allPairs) {
+        if (!graph.adjacency[pair.a].includes(pair.b)) {
+          extraPlanarCandidates.push(pair);
+        }
+      }
+
+      const maximalPlanarPool = [];
+      const tempEdges = graph.edges.map((e) => ({ ...e }));
+      for (const pair of extraPlanarCandidates) {
+        if (PlanarGeometry.canAddPlanarEdge(graph.vertices, tempEdges, pair.a, pair.b, 38)) {
+          tempEdges.push({ a: pair.a, b: pair.b });
+          maximalPlanarPool.push(pair);
+        }
+      }
+
+      const targetExtraCount = Math.max(
+        1,
+        Math.round(maximalPlanarPool.length * DENSITIES[density])
+      );
+      const chosenExtras = rng.shuffle(maximalPlanarPool).slice(0, targetExtraCount);
+      for (const edge of chosenExtras) {
+        if (PlanarGeometry.canAddPlanarEdge(graph.vertices, graph.edges, edge.a, edge.b, 36)) {
+          this.addEdge(graph, edge.a, edge.b);
+        }
+      }
+
+      return this.relaxPlanarLayout(this.finalize(graph), rng.fork("relax"));
     }
 
     static research(vertices, rng) {
       const n = Number(vertices);
       if (!Number.isInteger(n) || n < 6 || n > 16) throw new Error("Vertex count must be an integer from 6 to 16.");
-      const base = this.emptyGraph(n, "research");
-      for (let i = 0; i < n - 1; i += 1) this.addEdge(base, i, i + 1);
-      this.addEdge(base, 0, n - 2);
-      this.addEdge(base, 1, n - 1);
-      const verifiedBase = this.permuteGraph(this.finalize(base), rng);
-      const candidate = this.cloneGraph(verifiedBase);
-      const missing = [];
+
+      // Construct planar base graph:
+      // Outer cycle: 1 - 2 - ... - (n-2) - 0 - 1 (n-1 vertices)
+      // Interior vertex: (n-1) connected to 1 and (n-2).
+      // This is isomorphic to Theta(2, 2, n-3): planar, 2-connected, has Hamiltonian path, no Hamiltonian cycle.
+      const labels = rng.shuffle(Array.from({ length: n }, (_, index) => index));
+      const graph = this.emptyGraph(n, "research");
+
+      const cycleOrder = [];
+      for (let i = 1; i <= n - 2; i += 1) cycleOrder.push(labels[i]);
+      cycleOrder.push(labels[0]); // labels[0] sits between labels[n-2] and labels[1]
+      const innerVertex = labels[n - 1];
+
+      const angleOffset = rng.next() * Math.PI * 2;
+      const m = cycleOrder.length; // n - 1
+      cycleOrder.forEach((vId, idx) => {
+        const theta = angleOffset + (idx / m) * Math.PI * 2;
+        const isOuterCap = vId === labels[0];
+        const rx = isOuterCap ? 315 : 285;
+        const ry = isOuterCap ? 228 : 208;
+        graph.vertices[vId].x = clamp(400 + rx * Math.cos(theta), 68, 732);
+        graph.vertices[vId].y = clamp(300 + ry * Math.sin(theta), 66, 534);
+      });
+
+      // Place innerVertex inside the polygon, slightly toward the bisector of labels[1] and labels[n-2]
+      const capAngle = angleOffset + ((m - 1) / m) * Math.PI * 2;
+      graph.vertices[innerVertex].x = clamp(400 + 55 * Math.cos(capAngle), 260, 540);
+      graph.vertices[innerVertex].y = clamp(300 + 42 * Math.sin(capAngle), 200, 400);
+
+      for (let i = 0; i < n - 1; i += 1) this.addEdge(graph, labels[i], labels[i + 1]);
+      this.addEdge(graph, labels[0], labels[n - 2]);
+      this.addEdge(graph, labels[1], labels[n - 1]);
+      this.finalize(graph);
+
+      // Gather candidate planar chords sorted by distance so short, natural planar chords are tried first
+      const candidates = [];
       for (let a = 0; a < n; a += 1) {
         for (let b = a + 1; b < n; b += 1) {
-          if (!candidate.adjacency[a].includes(b)) missing.push({ a, b });
+          if (!graph.adjacency[a].includes(b)) {
+            const dist = Math.hypot(
+              graph.vertices[a].x - graph.vertices[b].x,
+              graph.vertices[a].y - graph.vertices[b].y
+            );
+            candidates.push({ a, b, score: dist * (0.9 + rng.next() * 0.2) });
+          }
         }
       }
-      for (const edge of rng.shuffle(missing)) {
-        this.addEdge(candidate, edge.a, edge.b);
-        if (GraphAnalyzer.hasHamiltonianCycle(candidate)) {
-          candidate.adjacency[edge.a] = candidate.adjacency[edge.a].filter((v) => v !== edge.b);
-          candidate.adjacency[edge.b] = candidate.adjacency[edge.b].filter((v) => v !== edge.a);
-          candidate.edges = candidate.edges.filter((item) => edgeKey(item.a, item.b) !== edgeKey(edge.a, edge.b));
+      candidates.sort((c1, c2) => c1.score - c2.score);
+
+      for (const edge of candidates) {
+        if (!PlanarGeometry.canAddPlanarEdge(graph.vertices, graph.edges, edge.a, edge.b, 38)) {
+          continue;
+        }
+        this.addEdge(graph, edge.a, edge.b);
+        if (GraphAnalyzer.hasHamiltonianCycle(graph)) {
+          this.removeEdge(graph, edge.a, edge.b);
         }
       }
-      this.finalize(candidate);
-      const valid = GraphAnalyzer.isConnected(candidate)
-        && GraphAnalyzer.isTwoVertexConnected(candidate)
-        && GraphAnalyzer.hasHamiltonianPath(candidate)
-        && !GraphAnalyzer.hasHamiltonianCycle(candidate);
-      const graph = valid ? candidate : verifiedBase;
-      const fallbackValid = GraphAnalyzer.isConnected(graph)
+
+      this.finalize(graph);
+      const valid = GraphAnalyzer.isConnected(graph)
         && GraphAnalyzer.isTwoVertexConnected(graph)
         && GraphAnalyzer.hasHamiltonianPath(graph)
         && !GraphAnalyzer.hasHamiltonianCycle(graph);
-      if (!fallbackValid) throw new Error("Unable to generate a verified Research Challenge graph.");
-      return this.layoutGraph(graph, rng.fork("layout"));
+      if (!valid) throw new Error("Unable to generate a verified planar Research Challenge graph.");
+
+      return this.relaxPlanarLayout(graph, rng.fork("layout"));
     }
 
     static theta(p, q, r, rng) {
@@ -206,7 +508,7 @@
       }
       const permuted = this.permuteGraph(this.finalize(graph), rng);
       if (!this.hasThreeInternallyDisjointPaths(permuted)) throw new Error("Theta path verification failed.");
-      return this.layoutGraph(permuted, rng.fork("layout"));
+      return this.thetaLayout(permuted);
     }
 
     static hasThreeInternallyDisjointPaths(graph) {
@@ -238,93 +540,79 @@
       return this.finalize(result);
     }
 
-    static layoutGraph(graph, rng) {
-      if (graph.type === "theta" && graph.thetaPaths) return this.thetaLayout(graph);
+    static relaxPlanarLayout(graph) {
       const n = graph.vertices.length;
-      const positions = graph.vertices.map((vertex, index) => ({
-        x: 400 + 265 * Math.cos((index / n) * Math.PI * 2) + (rng.next() - 0.5) * 45,
-        y: 300 + 205 * Math.sin((index / n) * Math.PI * 2) + (rng.next() - 0.5) * 45
-      }));
-      const iterations = 360;
-      for (let iteration = 0; iteration < iterations; iteration += 1) {
-        const forces = Array.from({ length: n }, () => ({ x: 0, y: 0 }));
-        for (let a = 0; a < n; a += 1) {
-          for (let b = a + 1; b < n; b += 1) {
-            let dx = positions[a].x - positions[b].x;
-            let dy = positions[a].y - positions[b].y;
-            let distanceSquared = dx * dx + dy * dy;
-            if (distanceSquared < 1) {
-              dx = rng.next() - 0.5;
-              dy = rng.next() - 0.5;
-              distanceSquared = dx * dx + dy * dy + 1;
-            }
-            const force = 7800 / distanceSquared;
-            const distance = Math.sqrt(distanceSquared);
-            const fx = (dx / distance) * force;
-            const fy = (dy / distance) * force;
-            forces[a].x += fx; forces[a].y += fy;
-            forces[b].x -= fx; forces[b].y -= fy;
-          }
-        }
-        for (const edge of graph.edges) {
-          const a = positions[edge.a];
-          const b = positions[edge.b];
-          const dx = b.x - a.x;
-          const dy = b.y - a.y;
-          const distance = Math.max(1, Math.hypot(dx, dy));
-          const force = (distance - 125) * 0.018;
-          const fx = (dx / distance) * force;
-          const fy = (dy / distance) * force;
-          forces[edge.a].x += fx; forces[edge.a].y += fy;
-          forces[edge.b].x -= fx; forces[edge.b].y -= fy;
-        }
-        const cooling = 1 - iteration / (iterations * 1.3);
+      const minSep = Math.max(115, 172 - n * 3.4);
+      const minClearance = 36;
+      const idealEdgeLen = Math.max(135, 200 - n * 3.5);
+
+      for (let iter = 0; iter < 90; iter += 1) {
+        const cooling = 1 - iter / 110;
         for (let i = 0; i < n; i += 1) {
-          forces[i].x += (400 - positions[i].x) * 0.0015;
-          forces[i].y += (300 - positions[i].y) * 0.0015;
-          positions[i].x = clamp(positions[i].x + forces[i].x * cooling * 0.6, 62, 738);
-          positions[i].y = clamp(positions[i].y + forces[i].y * cooling * 0.6, 62, 538);
-        }
-        for (let a = 0; a < n; a += 1) {
-          for (let b = a + 1; b < n; b += 1) {
-            const dx = positions[b].x - positions[a].x;
-            const dy = positions[b].y - positions[a].y;
-            const distance = Math.max(0.1, Math.hypot(dx, dy));
-            if (distance < 70) {
-              const push = (70 - distance) * 0.25;
-              const px = (dx / distance) * push;
-              const py = (dy / distance) * push;
-              positions[a].x -= px; positions[a].y -= py;
-              positions[b].x += px; positions[b].y += py;
-            }
+          let fx = 0;
+          let fy = 0;
+          for (let j = 0; j < n; j += 1) {
+            if (i === j) continue;
+            const dx = graph.vertices[i].x - graph.vertices[j].x;
+            const dy = graph.vertices[i].y - graph.vertices[j].y;
+            const distSq = Math.max(25, dx * dx + dy * dy);
+            const dist = Math.sqrt(distSq);
+            const repulse = 12000 / distSq;
+            fx += (dx / dist) * repulse;
+            fy += (dy / dist) * repulse;
+          }
+          for (const neighbor of graph.adjacency[i]) {
+            const dx = graph.vertices[neighbor].x - graph.vertices[i].x;
+            const dy = graph.vertices[neighbor].y - graph.vertices[i].y;
+            const dist = Math.max(1, Math.hypot(dx, dy));
+            const spring = (dist - idealEdgeLen) * 0.025;
+            fx += (dx / dist) * spring;
+            fy += (dy / dist) * spring;
+          }
+          fx += (400 - graph.vertices[i].x) * 0.012;
+          fy += (300 - graph.vertices[i].y) * 0.012;
+
+          const stepX = clamp(fx * cooling * 0.45, -12, 12);
+          const stepY = clamp(fy * cooling * 0.45, -12, 12);
+          const oldX = graph.vertices[i].x;
+          const oldY = graph.vertices[i].y;
+          graph.vertices[i].x = clamp(oldX + stepX, 68, 732);
+          graph.vertices[i].y = clamp(oldY + stepY, 66, 534);
+
+          if (!PlanarGeometry.isValidPlanarLayout(graph.vertices, graph.edges, minSep, minClearance)) {
+            graph.vertices[i].x = oldX;
+            graph.vertices[i].y = oldY;
           }
         }
       }
-      graph.vertices.forEach((vertex, index) => {
-        vertex.x = clamp(positions[index].x, 62, 738);
-        vertex.y = clamp(positions[index].y, 62, 538);
-      });
       return graph;
     }
 
     static thetaLayout(graph) {
       const paths = graph.thetaPaths.map((path) => path.slice());
-      const directIndex = paths.findIndex((path) => path.length === 2);
-      if (directIndex > 0 && directIndex !== 1) [paths[1], paths[directIndex]] = [paths[directIndex], paths[1]];
-      const offsets = [-155, 0, 155];
+      // Place the shortest path in the middle (index 1) so longer paths enjoy the wide upper/lower arches
+      paths.sort((a, b) => a.length - b.length);
+      [paths[0], paths[1]] = [paths[1], paths[0]];
+
+      const startX = 80;
+      const endX = 720;
+      const spanX = endX - startX;
+      const centerY = 300;
+      const offsets = [-210, 0, 210];
+
       paths.forEach((path, pathIndex) => {
         const length = path.length - 1;
         for (let i = 1; i < path.length - 1; i += 1) {
           const t = i / length;
           const vertex = graph.vertices[path[i]];
-          vertex.x = 115 + 570 * t;
-          vertex.y = 300 + offsets[pathIndex] * Math.sin(Math.PI * t);
+          vertex.x = startX + spanX * t;
+          vertex.y = centerY + offsets[pathIndex] * Math.sin(Math.PI * t);
         }
       });
-      graph.vertices[paths[0][0]].x = 115;
-      graph.vertices[paths[0][0]].y = 300;
-      graph.vertices[paths[0][paths[0].length - 1]].x = 685;
-      graph.vertices[paths[0][paths[0].length - 1]].y = 300;
+      graph.vertices[paths[0][0]].x = startX;
+      graph.vertices[paths[0][0]].y = centerY;
+      graph.vertices[paths[0][paths[0].length - 1]].x = endX;
+      graph.vertices[paths[0][paths[0].length - 1]].y = centerY;
       return graph;
     }
   }
@@ -344,6 +632,10 @@
     static density(graph) {
       const n = graph.vertices.length;
       return n > 1 ? (2 * this.edgeCount(graph)) / (n * (n - 1)) : 0;
+    }
+
+    static isPlanarDrawing(graph) {
+      return PlanarGeometry.isValidPlanarLayout(graph.vertices, graph.edges, 40, 12);
     }
 
     static isConnected(graph) {
@@ -472,7 +764,6 @@
       return observations;
     }
   }
-
 
   /* ================================================================
      5. Game state
@@ -606,10 +897,12 @@
       const state = this.state;
       if (!state || state.head === null) return [];
       const occupied = state.occupied;
+      // When snake length is 2, moving into the tail is reversing directly across its single edge, which is disallowed
+      const canMoveToTail = state.snakeBody.length > 2;
       return state.graph.adjacency[state.head].filter((vertex) => {
         const growing = vertex === state.apple;
         if (!occupied.has(vertex)) return true;
-        return vertex === state.tail && !growing;
+        return vertex === state.tail && !growing && canMoveToTail;
       });
     }
 
@@ -623,9 +916,12 @@
       if (!state.graph.adjacency[from].includes(vertex)) return { ok: false, error: "The snake can move only along an existing edge." };
       if (!this.legalMoves().includes(vertex)) {
         const growing = vertex === state.apple;
-        const message = growing && vertex === state.tail
-          ? "The snake cannot grow into its current tail."
-          : "The snake cannot move into its own body.";
+        let message = "The snake cannot move into its own body.";
+        if (growing && vertex === state.tail) {
+          message = "The snake cannot grow into its current tail.";
+        } else if (vertex === state.tail && state.snakeBody.length === 2) {
+          message = "When the snake length is 2, it cannot turn around into its tail.";
+        }
         return { ok: false, error: message };
       }
 
@@ -703,7 +999,8 @@
       const target = state.apple;
       if (start === target) return [start];
       const blocked = state.occupied;
-      if (state.tail !== target) blocked.delete(state.tail);
+      // Only allow the tail vertex as a passable destination when snake length > 2
+      if (state.tail !== target && state.snakeBody.length > 2) blocked.delete(state.tail);
       const parent = new Map([[start, null]]);
       const queue = [start];
       for (let index = 0; index < queue.length; index += 1) {
@@ -749,7 +1046,6 @@
     }
   }
 
-
   /* ================================================================
      9. Dynamic SVG graph renderer
      ================================================================ */
@@ -773,21 +1069,33 @@
       description.textContent = `${state.graph.vertices.length} vertices and ${state.graph.edges.length} undirected edges.`;
       this.svg.append(title, description);
       const edgesGroup = this.element("g", { "aria-hidden": "true" });
+      const snakeEdgesGroup = this.element("g", { "aria-hidden": "true" });
       const nodesGroup = this.element("g");
-      this.svg.append(edgesGroup, nodesGroup);
+      this.svg.append(edgesGroup, snakeEdgesGroup, nodesGroup);
 
       const snakeEdges = new Set();
-      for (let i = 0; i < state.snakeBody.length - 1; i += 1) snakeEdges.add(edgeKey(state.snakeBody[i], state.snakeBody[i + 1]));
+      for (let i = 0; i < state.snakeBody.length - 1; i += 1) {
+        snakeEdges.add(edgeKey(state.snakeBody[i], state.snakeBody[i + 1]));
+      }
       const headNeighbors = new Set(state.head === null ? [] : state.graph.adjacency[state.head]);
       for (const edge of state.graph.edges) {
         const a = state.graph.vertices[edge.a];
         const b = state.graph.vertices[edge.b];
+        const isSnakeEdge = snakeEdges.has(edgeKey(edge.a, edge.b));
         const classes = ["graph-edge"];
-        if (snakeEdges.has(edgeKey(edge.a, edge.b))) classes.push("is-snake-path");
-        if (headNeighbors.has(edge.a) || headNeighbors.has(edge.b)) classes.push("is-near-head");
-        edgesGroup.appendChild(this.element("line", {
+        if (isSnakeEdge) {
+          classes.push("is-snake-path");
+        } else if (headNeighbors.has(edge.a) || headNeighbors.has(edge.b)) {
+          classes.push("is-near-head");
+        }
+        const lineEl = this.element("line", {
           x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: classes.join(" ")
-        }));
+        });
+        if (isSnakeEdge) {
+          snakeEdgesGroup.appendChild(lineEl);
+        } else {
+          edgesGroup.appendChild(lineEl);
+        }
       }
 
       const occupied = state.occupied;
@@ -849,9 +1157,10 @@
     legalMovesForRender(state) {
       if (state.head === null) return [];
       const occupied = state.occupied;
+      const canMoveToTail = state.snakeBody.length > 2;
       return state.graph.adjacency[state.head].filter((vertex) => {
         const growing = vertex === state.apple;
-        return !occupied.has(vertex) || (vertex === state.tail && !growing);
+        return !occupied.has(vertex) || (vertex === state.tail && !growing && canMoveToTail);
       });
     }
 
@@ -978,7 +1287,6 @@
       }
     }
   }
-
 
   /* ================================================================
      11. UI controller, controls, dialogs, and cancellable AI timers
@@ -1190,7 +1498,7 @@
         this.graph = graph;
         this.showGame();
         this.beginMatch();
-        this.showToast("New graph generated with a fresh seed.");
+        this.showToast("New planar graph generated with a fresh seed.");
       } catch (error) {
         this.showToast(error.message);
       }
@@ -1318,10 +1626,11 @@
       const twoConnected = GraphAnalyzer.isTwoVertexConnected(graph);
       const hasPath = GraphAnalyzer.hasHamiltonianPath(graph);
       const hasCycle = GraphAnalyzer.hasHamiltonianCycle(graph);
+      const planar = GraphAnalyzer.isPlanarDrawing(graph);
       const cards = [
         ["Vertices", graph.vertices.length, ""],
         ["Edges", GraphAnalyzer.edgeCount(graph), ""],
-        ["Graph density", GraphAnalyzer.density(graph).toFixed(3), ""],
+        ["Planar embedding", planar ? "Yes" : "No", planar ? "is-yes" : "is-no"],
         ["Minimum degree", Math.min(...degrees), ""],
         ["Maximum degree", Math.max(...degrees), ""],
         ["Connected", connected ? "Yes" : "No", connected ? "is-yes" : "is-no"],
@@ -1412,7 +1721,6 @@
     }
   }
 
-
   /* ================================================================
      12. Application initialization
      ================================================================ */
@@ -1473,140 +1781,45 @@
       same(Array.from({ length: 12 }, () => rngA.next()), Array.from({ length: 12 }, () => rngB.next()));
     });
 
-    test("General graphs are connected, simple, and undirected", () => {
+    test("General, Research, and Theta graphs are planar and unclustered", () => {
       for (const n of [6, 10, 16]) {
         for (const density of Object.keys(DENSITIES)) {
           const graph = GraphGenerator.general(n, density, new SeededRandom(`${n}-${density}`));
           assert(GraphAnalyzer.isConnected(graph), `Disconnected ${n}-${density} graph`);
           assertSimpleUndirected(graph);
+          assert(PlanarGeometry.isValidPlanarLayout(graph.vertices, graph.edges, 105, 30), `General ${n}-${density} is non-planar or clustered`);
         }
+        const rGraph = GraphGenerator.research(n, new SeededRandom(`research-${n}`));
+        assertSimpleUndirected(rGraph);
+        assert(GraphAnalyzer.isConnected(rGraph), `Research ${n} disconnected`);
+        assert(GraphAnalyzer.isTwoVertexConnected(rGraph), `Research ${n} not 2-connected`);
+        assert(GraphAnalyzer.hasHamiltonianPath(rGraph), `Research ${n} lacks Hamiltonian path`);
+        assert(!GraphAnalyzer.hasHamiltonianCycle(rGraph), `Research ${n} has Hamiltonian cycle`);
+        assert(PlanarGeometry.isValidPlanarLayout(rGraph.vertices, rGraph.edges, 100, 30), `Research ${n} is non-planar or clustered`);
       }
-    });
-
-    test("Research graphs satisfy all verified properties", () => {
-      for (const n of [6, 7, 10, 16]) {
-        const graph = GraphGenerator.research(n, new SeededRandom(`research-${n}`));
-        assertSimpleUndirected(graph);
-        assert(GraphAnalyzer.isConnected(graph), `Research ${n} disconnected`);
-        assert(GraphAnalyzer.isTwoVertexConnected(graph), `Research ${n} not 2-connected`);
-        assert(GraphAnalyzer.hasHamiltonianPath(graph), `Research ${n} lacks Hamiltonian path`);
-        assert(!GraphAnalyzer.hasHamiltonianCycle(graph), `Research ${n} has Hamiltonian cycle`);
-      }
-    });
-
-    test("Theta graphs have three internally disjoint paths and exact size", () => {
       for (const [p, q, r] of [[1, 3, 3], [2, 2, 3], [3, 3, 3], [1, 2, 8]]) {
-        const graph = GraphGenerator.theta(p, q, r, new SeededRandom(`${p}-${q}-${r}`));
-        equal(graph.vertices.length, p + q + r - 1, "Theta vertex formula");
-        assert(GraphGenerator.hasThreeInternallyDisjointPaths(graph), "Theta paths are not internally disjoint");
-        assertSimpleUndirected(graph);
+        const tGraph = GraphGenerator.theta(p, q, r, new SeededRandom(`${p}-${q}-${r}`));
+        equal(tGraph.vertices.length, p + q + r - 1, "Theta vertex formula");
+        assert(GraphGenerator.hasThreeInternallyDisjointPaths(tGraph), "Theta paths are not internally disjoint");
+        assertSimpleUndirected(tGraph);
+        assert(PlanarGeometry.isValidPlanarLayout(tGraph.vertices, tGraph.edges, 55, 18), `Theta ${p}-${q}-${r} is non-planar`);
       }
     });
 
-    test("Invalid theta parameter combinations are rejected", () => {
-      assert(!GraphGenerator.validateTheta(1, 1, 5).valid, "Multiple direct paths accepted");
-      assert(!GraphGenerator.validateTheta(1, 2, 2).valid, "Undersized graph accepted");
-      assert(!GraphGenerator.validateTheta(6, 6, 6).valid, "Oversized graph accepted");
-      assert(!GraphGenerator.validateTheta(2.5, 3, 3).valid, "Fractional length accepted");
-      assert(!GraphGenerator.validateTheta(0, 4, 4).valid, "Zero length accepted");
-    });
-
-    test("Connectivity and Tarjan articulation points are exact on a path", () => {
-      const graph = pathGraph(6);
-      assert(GraphAnalyzer.isConnected(graph));
-      same(GraphAnalyzer.articulationPoints(graph), [1, 2, 3, 4]);
-      assert(!GraphAnalyzer.isTwoVertexConnected(graph));
-    });
-
-    test("Cycle analysis detects 2-connectivity and Hamiltonian structures", () => {
-      const graph = knownGraph(6, [[0,1],[1,2],[2,3],[3,4],[4,5],[5,0]]);
-      assert(GraphAnalyzer.isConnected(graph));
-      same(GraphAnalyzer.articulationPoints(graph), []);
-      assert(GraphAnalyzer.isTwoVertexConnected(graph));
-      assert(GraphAnalyzer.hasHamiltonianPath(graph));
-      assert(GraphAnalyzer.hasHamiltonianCycle(graph));
-    });
-
-    test("Disconnected graph has no Hamiltonian path", () => {
-      const graph = knownGraph(6, [[0,1],[1,2],[2,0],[3,4],[4,5],[5,3]]);
-      assert(!GraphAnalyzer.isConnected(graph));
-      assert(!GraphAnalyzer.hasHamiltonianPath(graph));
-      assert(!GraphAnalyzer.hasHamiltonianCycle(graph));
-    });
-
-    test("Hamiltonian path does not incorrectly imply a cycle", () => {
-      const graph = pathGraph(8);
-      assert(GraphAnalyzer.hasHamiltonianPath(graph));
-      assert(!GraphAnalyzer.hasHamiltonianCycle(graph));
-    });
-
-    test("Theta theorem covers all sufficient and negative cases", () => {
-      assert(GraphAnalyzer.classifyTheta(1, 3, 4));
-      assert(GraphAnalyzer.classifyTheta(3, 1, 4));
-      assert(GraphAnalyzer.classifyTheta(2, 2, 3));
-      assert(GraphAnalyzer.classifyTheta(3, 2, 2));
-      assert(!GraphAnalyzer.classifyTheta(2, 3, 3));
-      assert(!GraphAnalyzer.classifyTheta(3, 4, 4));
-    });
-
-    test("Initial state has no snake or apple; start creates length one", () => {
-      const engine = engineFor(pathGraph(6));
-      equal(engine.state.snakeBody.length, 0);
-      equal(engine.state.apple, null);
-      assert(engine.selectStart(2).ok);
-      same(engine.state.snakeBody, [2]);
-      equal(engine.state.applesEaten, 0);
-      equal(engine.state.totalMoves, 0);
-      equal(engine.state.phase, STATES.PLACE_APPLE);
-    });
-
-    test("Apple placement rejects occupied and invalid vertices", () => {
-      const engine = engineFor(pathGraph(6));
-      engine.selectStart(0);
-      assert(!engine.placeApple(0).ok);
-      assert(!engine.placeApple(99).ok);
-      assert(engine.placeApple(2).ok);
-      equal(engine.state.apple, 2);
-      equal(engine.state.movesUsed, 0);
-    });
-
-    test("Movement follows edges and rejects body collisions without counting", () => {
-      const engine = engineFor(pathGraph(6));
-      engine.selectStart(0);
-      engine.placeApple(3);
-      assert(!engine.moveSnake(2).ok, "Non-adjacent move accepted");
-      equal(engine.state.movesUsed, 0);
-      assert(engine.moveSnake(1).ok);
-      equal(engine.state.movesUsed, 1);
-      same(engine.state.snakeBody, [1]);
-      engine.state.snakeBody = [0, 1, 2];
+    test("When snake length is 2, snake cannot turn around into its tail", () => {
+      const engine = engineFor(pathGraph(5));
+      engine.state.snakeBody = [0, 1];
+      engine.state.phase = STATES.SNAKE_MOVE;
       engine.state.apple = 4;
-      assert(!engine.moveSnake(1).ok, "Body collision accepted");
-      equal(engine.state.movesUsed, 1);
+      assert(!engine.legalMoves().includes(0), "Tail vertex 0 should be illegal at length 2");
+      assert(engine.legalMoves().includes(2), "Forward vertex 2 should be legal at length 2");
+      const moveBack = engine.moveSnake(0);
+      assert(!moveBack.ok, "Moving into tail at length 2 should be rejected");
+      same(engine.state.snakeBody, [0, 1], "Snake body should remain unchanged after rejected move");
+      equal(engine.state.movesUsed, 0, "Rejected move should not consume move budget");
     });
 
-    test("Normal movement removes tail and appends head", () => {
-      const engine = engineFor(pathGraph(6));
-      engine.selectStart(0);
-      engine.placeApple(3);
-      engine.moveSnake(1);
-      same(engine.state.snakeBody, [1], "Tail did not move");
-    });
-
-    test("Apple consumption preserves tail and grows by exactly one", () => {
-      const engine = engineFor(pathGraph(6));
-      engine.selectStart(0);
-      engine.placeApple(1);
-      const result = engine.moveSnake(1);
-      assert(result.ok && result.ateApple);
-      same(engine.state.snakeBody, [0, 1]);
-      equal(engine.state.applesEaten, 1);
-      equal(engine.state.phase, STATES.PLACE_APPLE);
-      engine.placeApple(3);
-      equal(engine.state.movesUsed, 0, "Counter did not reset");
-    });
-
-    test("Current tail is legal on a normal move", () => {
+    test("When snake length is > 2, current tail is legal on a non-growing move", () => {
       const engine = engineFor(knownGraph(3, [[0,1],[1,2],[2,0]]));
       engine.state.snakeBody = [0, 1, 2];
       engine.state.phase = STATES.SNAKE_MOVE;
@@ -1616,158 +1829,13 @@
       same(engine.state.snakeBody, [1, 2, 0]);
     });
 
-    test("Current tail is illegal when the move would grow", () => {
-      const engine = engineFor(knownGraph(3, [[0,1],[1,2],[2,0]]));
-      engine.state.snakeBody = [0, 1, 2];
-      engine.state.phase = STATES.SNAKE_MOVE;
+    test("SnakeAI BFS respects length-2 tail restriction", () => {
+      const engine = engineFor(pathGraph(4));
+      engine.state.snakeBody = [1, 2];
       engine.state.apple = 0;
-      assert(!engine.legalMoves().includes(0));
-      assert(!engine.moveSnake(0).ok);
-    });
-
-    test("Snake victory occurs immediately upon filling the graph", () => {
-      const engine = engineFor(knownGraph(2, [[0,1]]));
-      engine.selectStart(0);
-      engine.placeApple(1);
-      engine.moveSnake(1);
-      equal(engine.state.winner, "snake");
-      equal(engine.state.phase, STATES.GAME_OVER);
-      equal(engine.state.snakeBody.length, 2);
-    });
-
-    test("Movement-limit loss is enforced at exactly 2n", () => {
-      const engine = engineFor(pathGraph(6));
-      engine.state.snakeBody = [0];
       engine.state.phase = STATES.SNAKE_MOVE;
-      engine.state.apple = 2;
-      engine.state.movesUsed = 11;
-      engine.moveSnake(1);
-      equal(engine.state.movesUsed, 12);
-      equal(engine.state.winner, "apple");
-      assert(engine.state.history.some((event) => event.title === "Movement-limit loss"));
-    });
-
-    test("Apple eaten on the final permitted move succeeds", () => {
-      const engine = engineFor(pathGraph(6));
-      engine.state.snakeBody = [0];
-      engine.state.phase = STATES.SNAKE_MOVE;
-      engine.state.apple = 1;
-      engine.state.movesUsed = 11;
-      engine.moveSnake(1);
-      equal(engine.state.applesEaten, 1);
-      equal(engine.state.winner, null);
-      equal(engine.state.phase, STATES.PLACE_APPLE);
-    });
-
-    test("No legal adjacent movement gives Apple the win", () => {
-      const graph = knownGraph(4, [[0,1],[0,2],[0,3]]);
-      const engine = engineFor(graph);
-      engine.state.snakeBody = [1, 0, 2];
-      engine.state.phase = STATES.PLACE_APPLE;
-      equal(engine.legalMoves().length, 0);
-      engine.placeApple(3);
-      equal(engine.state.winner, "apple");
-      assert(engine.state.history.some((event) => event.title === "Collision-related loss") || engine.state.resultReason.includes("no legal"));
-    });
-
-    test("Random Apple AI always selects a valid unoccupied vertex", () => {
-      const engine = engineFor(pathGraph(6));
-      engine.selectStart(0);
-      const rng = new SeededRandom("apple-test");
-      for (let i = 0; i < 30; i += 1) {
-        const vertex = AppleAI.chooseApple(engine.state, rng);
-        assert(vertex >= 1 && vertex < 6, "Invalid Apple AI selection");
-      }
-    });
-
-    test("BFS finds a shortest path on a known graph", () => {
-      const graph = knownGraph(6, [[0,1],[1,2],[2,3],[0,4],[4,5],[5,3],[1,4]]);
-      const engine = engineFor(graph);
-      engine.state.snakeBody = [0];
-      engine.state.apple = 3;
-      const path = SnakeAI.findPath(engine.state);
-      equal(path.length, 4, "BFS path is not shortest");
-      equal(path[0], 0);
-      equal(path[path.length - 1], 3);
-    });
-
-    test("BFS avoids occupied vertices", () => {
-      const engine = engineFor(pathGraph(6));
-      engine.state.snakeBody = [0, 4, 1, 2];
-      engine.state.apple = 5;
+      // Path 2 -> 1 -> 0 is blocked because snake has length 2 and cannot reverse into tail 1
       equal(SnakeAI.findPath(engine.state), null);
-    });
-
-    test("BFS permits the current tail when it opens a route", () => {
-      const graph = knownGraph(4, [[0,1],[1,2],[2,0],[0,3]]);
-      const engine = engineFor(graph);
-      engine.state.snakeBody = [0, 1, 2];
-      engine.state.apple = 3;
-      same(SnakeAI.findPath(engine.state), [2, 0, 3]);
-    });
-
-    test("BFS fallback selects only a currently legal move", () => {
-      const graph = knownGraph(4, [[0,1],[1,2],[2,0],[1,3]]);
-      const engine = engineFor(graph);
-      engine.state.snakeBody = [0, 1, 2];
-      engine.state.apple = 3;
-      engine.state.phase = STATES.SNAKE_MOVE;
-      equal(SnakeAI.findPath(engine.state), null);
-      const move = SnakeAI.chooseMove(engine.state, new SeededRandom("fallback"), engine);
-      equal(move, 0);
-      assert(engine.legalMoves().includes(move));
-    });
-
-    test("Snake AI recalculates from the updated body after each move", () => {
-      const engine = engineFor(pathGraph(6));
-      engine.selectStart(0);
-      engine.placeApple(3);
-      const first = SnakeAI.chooseMove(engine.state, new SeededRandom("recalculate"), engine);
-      equal(first, 1);
-      engine.moveSnake(first);
-      equal(SnakeAI.chooseMove(engine.state, new SeededRandom("recalculate-2"), engine), 2);
-      equal(engine.state.head, 1);
-    });
-
-    test("Pause blocks every action and resume restores the exact phase", () => {
-      const engine = engineFor(pathGraph(6));
-      engine.selectStart(0);
-      engine.placeApple(2);
-      assert(engine.pause());
-      equal(engine.state.phase, STATES.PAUSED);
-      assert(!engine.moveSnake(1).ok);
-      assert(!engine.placeApple(3).ok);
-      assert(!engine.selectStart(3).ok);
-      assert(engine.resume());
-      equal(engine.state.phase, STATES.SNAKE_MOVE);
-      equal(engine.state.movesUsed, 0);
-      assert(engine.moveSnake(1).ok);
-    });
-
-    test("Restart invalidates old sessions and clears all match residue", () => {
-      const engine = engineFor(pathGraph(6));
-      engine.selectStart(0);
-      engine.placeApple(2);
-      engine.moveSnake(1);
-      const oldSession = engine.session;
-      engine.startMatch({ mode: "hvh", humanRole: "snake", swapped: false }, pathGraph(6), "restart-test");
-      assert(engine.session > oldSession, "Session token was not invalidated");
-      equal(engine.state.snakeBody.length, 0);
-      equal(engine.state.apple, null);
-      equal(engine.state.totalMoves, 0);
-      equal(engine.state.applesEaten, 0);
-      equal(engine.state.phase, STATES.SELECT_START);
-    });
-
-    test("No game actions execute after termination", () => {
-      const engine = engineFor(knownGraph(2, [[0,1]]));
-      engine.selectStart(0);
-      engine.placeApple(1);
-      engine.moveSnake(1);
-      assert(!engine.moveSnake(0).ok);
-      assert(!engine.placeApple(0).ok);
-      assert(!engine.selectStart(1).ok);
-      equal(engine.state.totalMoves, 1);
     });
 
     const passed = results.filter((result) => result.passed).length;

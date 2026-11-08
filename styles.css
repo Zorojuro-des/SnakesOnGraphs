@@ -12,8 +12,13 @@
   --faint: #64766d;
   --snake: #b9e769;
   --snake-bright: #d6f58f;
-  --body: #49b893;
-  --tail: #287b69;
+  --snake-head: #00ff84;
+  --snake-head-stroke: #80F2FF;
+  --body: #2b9f2d;
+  --body-stroke: #C4B5FD;
+  --tail: #e5ff20;
+  --tail-stroke: #FFD166;
+  --snake-edge: #D946EF;
   --apple: #ff7967;
   --apple-soft: rgba(255, 121, 103, 0.14);
   --focus: #e1f8a8;
@@ -182,19 +187,20 @@ h1, h2, h3 { line-height: 1.12; }
 .graph-container::before { content: ""; position: absolute; inset: 0; opacity: 0.2; pointer-events: none; background-image: radial-gradient(rgba(198,222,204,0.23) 0.7px, transparent 0.7px); background-size: 22px 22px; mask-image: radial-gradient(circle, black, transparent 80%); }
 #graph-svg { position: relative; width: 100%; height: 100%; min-height: 440px; overflow: visible; touch-action: manipulation; user-select: none; }
 .graph-edge { stroke: #34473e; stroke-width: 2; vector-effect: non-scaling-stroke; transition: stroke 180ms ease, stroke-width 180ms ease; }
-.graph-edge.is-snake-path { stroke: rgba(73,184,147,0.72); stroke-width: 4; }
-.graph-edge.is-near-head { stroke: rgba(185,231,105,0.45); }
+.graph-edge.is-near-head { stroke: rgba(0, 229, 255, 0.48); stroke-width: 2.6; }
+.graph-edge.is-snake-path { stroke: var(--snake-edge); stroke-width: 6.5; stroke-linecap: round; filter: drop-shadow(0 0 6px rgba(217, 70, 239, 0.55)); }
 .vertex { cursor: default; }
 .vertex .node-ring { fill: transparent; stroke: transparent; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .vertex .node-circle { fill: #18241f; stroke: #63776b; stroke-width: 1.5; vector-effect: non-scaling-stroke; transition: fill 180ms ease, stroke 180ms ease; }
 .vertex .vertex-label { fill: #c9d6cd; font: 650 13px ui-sans-serif, system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
 .vertex .node-caption { fill: #74877b; font: 600 8px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.1em; text-anchor: middle; pointer-events: none; }
-.vertex.is-body .node-circle { fill: var(--body); stroke: #83d5b7; }
-.vertex.is-body .vertex-label, .vertex.is-tail .vertex-label, .vertex.is-head .vertex-label { fill: #0c1a13; }
-.vertex.is-tail .node-circle { fill: var(--tail); stroke: #55a894; }
-.vertex.is-tail .vertex-label { fill: #d6eee5; }
-.vertex.is-head .node-circle { fill: var(--snake); stroke: var(--snake-bright); stroke-width: 2.5; }
-.vertex.is-head .node-ring { stroke: rgba(185,231,105,0.2); stroke-width: 7; }
+.vertex.is-body .node-circle { fill: var(--body); stroke: var(--body-stroke); stroke-width: 2; }
+.vertex.is-body .vertex-label { fill: #ffffff; }
+.vertex.is-tail .node-circle { fill: var(--tail); stroke: var(--tail-stroke); stroke-width: 2; }
+.vertex.is-tail .vertex-label { fill: #241600; }
+.vertex.is-head .node-circle { fill: var(--snake-head); stroke: var(--snake-head-stroke); stroke-width: 2.5; }
+.vertex.is-head .vertex-label { fill: #041f24; }
+.vertex.is-head .node-ring { stroke: rgba(0, 229, 255, 0.28); stroke-width: 7; }
 .vertex.has-apple .node-circle { fill: var(--apple); stroke: #ffae93; }
 .vertex.has-apple .vertex-label { fill: #2b100d; }
 .vertex.has-apple .apple-stem { stroke: #712e28; stroke-width: 2; stroke-linecap: round; }
@@ -213,10 +219,11 @@ h1, h2, h3 { line-height: 1.12; }
 .graph-legend { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 13px; color: var(--faint); font-size: 8px; text-transform: uppercase; letter-spacing: 0.06em; }
 .graph-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .legend-dot { width: 7px; height: 7px; border-radius: 50%; background: #52665a; }
-.legend-dot--head { background: var(--snake); }
+.legend-dot--head { background: var(--snake-head); }
 .legend-dot--body { background: var(--body); }
 .legend-dot--tail { background: var(--tail); }
 .legend-dot--apple { background: var(--apple); }
+.legend-edge--snake { width: 14px; height: 4px; border-radius: 999px; background: var(--snake-edge); box-shadow: 0 0 6px rgba(217, 70, 239, 0.55); }
 .legend-ring { width: 8px; height: 8px; border: 1px dashed var(--snake); border-radius: 50%; }
 .graph-container.apple-flash { animation: apple-flash 420ms ease; }
 
@@ -240,7 +247,7 @@ kbd { min-width: 20px; display: inline-grid; place-items: center; padding: 2px 5
 .history-item::before { content: attr(data-number); position: absolute; left: 1px; top: 10px; color: var(--faint); font: 500 8px ui-monospace, SFMono-Regular, Consolas, monospace; }
 .history-item strong { display: block; margin-bottom: 2px; color: #c7d4cb; font-size: 9px; font-weight: 600; }
 .history-item--apple { border-left: 2px solid rgba(255,121,103,0.45); }
-.history-item--move { border-left: 2px solid rgba(73,184,147,0.4); }
+.history-item--move { border-left: 2px solid rgba(139,92,246,0.55); }
 .history-item--eat, .history-item--win { border-left: 2px solid var(--snake); }
 .history-item--loss { border-left: 2px solid var(--apple); }
 .controls-tip { margin-top: 18px; }
