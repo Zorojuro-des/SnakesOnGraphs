@@ -64,19 +64,27 @@
             </fieldset>
 
             <fieldset class="form-section">
-              <legend>Planar graph family</legend>
-              <div class="choice-grid choice-grid--three">
+              <legend>Graph family</legend>
+              <div class="choice-grid choice-grid--two">
                 <label class="choice-card choice-card--compact">
                   <input type="radio" name="graph-mode" value="general" checked>
                   <span class="choice-content"><strong>General planar</strong><small>Connected · seeded</small></span>
+                  <span class="choice-check" aria-hidden="true"></span>
                 </label>
                 <label class="choice-card choice-card--compact">
                   <input type="radio" name="graph-mode" value="research">
                   <span class="choice-content"><strong>Research challenge</strong><small>Planar · No Ham. cycle</small></span>
+                  <span class="choice-check" aria-hidden="true"></span>
                 </label>
                 <label class="choice-card choice-card--compact">
                   <input type="radio" name="graph-mode" value="theta">
                   <span class="choice-content"><strong>Theta graph</strong><small>Three disjoint paths</small></span>
+                  <span class="choice-check" aria-hidden="true"></span>
+                </label>
+                <label class="choice-card choice-card--compact">
+                  <input type="radio" name="graph-mode" value="custom">
+                  <span class="choice-content"><strong>Custom graph</strong><small>Draw vertices &amp; edges</small></span>
+                  <span class="choice-check" aria-hidden="true"></span>
                 </label>
               </div>
             </fieldset>
@@ -98,6 +106,32 @@
               <p class="field-note" id="theta-validation">Three paths share only their endpoints.</p>
             </div>
 
+            <div class="form-section settings-section custom-builder" id="custom-options" hidden>
+              <div class="builder-toolbar">
+                <div class="builder-tools" role="group" aria-label="Graph builder tools">
+                  <button class="builder-tool-btn is-active" type="button" data-builder-tool="vertex">Add / Move</button>
+                  <button class="builder-tool-btn" type="button" data-builder-tool="edge">Connect</button>
+                  <button class="builder-tool-btn" type="button" data-builder-tool="delete">Delete</button>
+                </div>
+                <div class="builder-actions">
+                  <button class="builder-action-btn" id="builder-sample" type="button">Load sample</button>
+                  <button class="builder-action-btn" id="builder-clear" type="button">Clear</button>
+                </div>
+              </div>
+
+              <div class="builder-canvas-wrap">
+                <svg id="custom-graph-svg" viewBox="0 0 800 600" role="img" aria-label="Custom graph editor canvas" preserveAspectRatio="xMidYMid meet"></svg>
+              </div>
+
+              <div class="builder-status">
+                <span class="builder-hint" id="builder-hint">Click empty space to add a vertex. Drag any vertex to move it.</span>
+                <div class="builder-pills">
+                  <span class="builder-pill" id="builder-counts">0 V · 0 E</span>
+                  <span class="builder-pill" id="builder-connectivity">Need 3+ vertices</span>
+                </div>
+              </div>
+            </div>
+
             <label class="field field--seed"><span>Random seed <small>optional</small></span><input id="seed-input" type="text" maxlength="64" placeholder="Leave blank to generate one" autocomplete="off" spellcheck="false"></label>
             <p class="form-error" id="setup-error" role="alert"></p>
             <button class="button button--primary button--start" type="submit"><span>Start game</span><span aria-hidden="true">→</span></button>
@@ -113,7 +147,7 @@
               <li><span class="rule-index rule-index--snake">S</span><div><strong>Snake follows the edges</strong><p>Move one edge per turn. Eat to grow without moving your tail; never cross your body or reverse into your tail at length 2.</p></div></li>
               <li><span class="rule-index">2n</span><div><strong>Every apple has a clock</strong><p>The snake must eat within twice the vertex count, or the Apple player wins.</p></div></li>
             </ol>
-            <div class="research-note"><span class="note-line"></span><p>Explore exact planar graph properties and research-based classifications during every match.</p></div>
+            <div class="research-note"><span class="note-line"></span><p>Explore exact graph properties and research-based classifications during every match—including your own custom graphs.</p></div>
           </aside>
         </div>
       </section>

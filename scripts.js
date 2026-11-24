@@ -17,7 +17,8 @@
   const GRAPH_LABELS = Object.freeze({
     general: "General planar",
     research: "Research challenge",
-    theta: "Theta graph"
+    theta: "Theta graph",
+    custom: "Custom graph"
   });
   const AI_DELAY = 400;
   const $ = (id) => document.getElementById(id);
@@ -347,7 +348,6 @@
       }
       allPairs.sort((p1, p2) => p1.score - p2.score);
 
-      // 1. Build a crossing-free planar spanning tree (Kruskal on shortest valid planar edges)
       const parent = Array.from({ length: n }, (_, i) => i);
       const find = (x) => {
         let root = x;
@@ -377,7 +377,6 @@
         }
       }
 
-      // Fallback with relaxed clearance if any component remained separated
       for (const pair of allPairs) {
         if (find(pair.a) !== find(pair.b)) {
           if (PlanarGeometry.canAddPlanarEdge(graph.vertices, graph.edges, pair.a, pair.b, 26)) {
@@ -387,7 +386,6 @@
         }
       }
 
-      // 2. Collect all remaining non-crossing planar triangulation chords
       const extraPlanarCandidates = [];
       for (const pair of allPairs) {
         if (!graph.adjacency[pair.a].includes(pair.b)) {
@@ -422,20 +420,16 @@
       const n = Number(vertices);
       if (!Number.isInteger(n) || n < 6 || n > 16) throw new Error("Vertex count must be an integer from 6 to 16.");
 
-      // Construct planar base graph:
-      // Outer cycle: 1 - 2 - ... - (n-2) - 0 - 1 (n-1 vertices)
-      // Interior vertex: (n-1) connected to 1 and (n-2).
-      // This is isomorphic to Theta(2, 2, n-3): planar, 2-connected, has Hamiltonian path, no Hamiltonian cycle.
       const labels = rng.shuffle(Array.from({ length: n }, (_, index) => index));
       const graph = this.emptyGraph(n, "research");
 
       const cycleOrder = [];
       for (let i = 1; i <= n - 2; i += 1) cycleOrder.push(labels[i]);
-      cycleOrder.push(labels[0]); // labels[0] sits between labels[n-2] and labels[1]
+      cycleOrder.push(labels[0]);
       const innerVertex = labels[n - 1];
 
       const angleOffset = rng.next() * Math.PI * 2;
-      const m = cycleOrder.length; // n - 1
+      const m = cycleOrder.length;
       cycleOrder.forEach((vId, idx) => {
         const theta = angleOffset + (idx / m) * Math.PI * 2;
         const isOuterCap = vId === labels[0];
@@ -445,7 +439,6 @@
         graph.vertices[vId].y = clamp(300 + ry * Math.sin(theta), 66, 534);
       });
 
-      // Place innerVertex inside the polygon, slightly toward the bisector of labels[1] and labels[n-2]
       const capAngle = angleOffset + ((m - 1) / m) * Math.PI * 2;
       graph.vertices[innerVertex].x = clamp(400 + 55 * Math.cos(capAngle), 260, 540);
       graph.vertices[innerVertex].y = clamp(300 + 42 * Math.sin(capAngle), 200, 400);
@@ -455,7 +448,6 @@
       this.addEdge(graph, labels[1], labels[n - 1]);
       this.finalize(graph);
 
-      // Gather candidate planar chords sorted by distance so short, natural planar chords are tried first
       const candidates = [];
       for (let a = 0; a < n; a += 1) {
         for (let b = a + 1; b < n; b += 1) {
@@ -590,7 +582,6 @@
 
     static thetaLayout(graph) {
       const paths = graph.thetaPaths.map((path) => path.slice());
-      // Place the shortest path in the middle (index 1) so longer paths enjoy the wide upper/lower arches
       paths.sort((a, b) => a.length - b.length);
       [paths[0], paths[1]] = [paths[1], paths[0]];
 
@@ -766,6 +757,310 @@
   }
 
   /* ================================================================
+     4b. Interactive Custom Graph Builder
+     ================================================================ */
+  class CustomGraphBuilder {
+    constructor(svg, onChange) {
+      this.svg = svg;
+      this.onChange = onChange;
+      this.vertices = [];
+      this.edges = [];
+      this.tool = "vertex";
+      this.selectedVertex = null;
+      this.draggingVertex = null;
+      this.dragMoved = false;
+      this.dragStart = null;
+      this.bindEvents();
+      this.loadSample();
+    }
+
+    element(name, attributes = {}) {
+      const node = document.createElementNS(SVG_NS, name);
+      for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
+      return node;
+    }
+
+    svgCoords(event) {
+      const ctm = this.svg.getScreenCTM();
+      if (ctm) {
+        const pt = this.svg.createSVGPoint();
+        pt.x = event.clientX;
+        pt.y = event.clientY;
+        const local = pt.matrixTransform(ctm.inverse());
+        return { x: local.x, y: local.y };
+      }
+      const rect = this.svg.getBoundingClientRect();
+      return {
+        x: ((event.clientX - rect.left) / rect.width) * 800,
+        y: ((event.clientY - rect.top) / rect.height) * 600
+      };
+    }
+
+    bindEvents() {
+      document.querySelectorAll("[data-builder-tool]").forEach((btn) => {
+        btn.addEventListener("click", () => this.setTool(btn.dataset.builderTool));
+      });
+      $("builder-clear").addEventListener("click", () => this.clear());
+      $("builder-sample").addEventListener("click", () => this.loadSample());
+
+      this.svg.addEventListener("pointerdown", (event) => {
+        if (this.tool !== "vertex") return;
+        const vertexEl = event.target.closest("[data-builder-vertex]");
+        if (!vertexEl) return;
+        const id = Number(vertexEl.dataset.builderVertex);
+        this.draggingVertex = id;
+        this.dragMoved = false;
+        this.dragStart = this.svgCoords(event);
+        if (this.svg.setPointerCapture) {
+          try { this.svg.setPointerCapture(event.pointerId); } catch (_) { /* ignore */ }
+        }
+      });
+
+      this.svg.addEventListener("pointermove", (event) => {
+        if (this.draggingVertex === null) return;
+        const pt = this.svgCoords(event);
+        if (!this.dragMoved && Math.hypot(pt.x - this.dragStart.x, pt.y - this.dragStart.y) > 4) {
+          this.dragMoved = true;
+        }
+        if (this.dragMoved) {
+          const v = this.vertices[this.draggingVertex];
+          if (v) {
+            v.x = clamp(pt.x, 68, 732);
+            v.y = clamp(pt.y, 66, 534);
+            this.render();
+          }
+        }
+      });
+
+      const endDrag = () => {
+        if (this.draggingVertex !== null) {
+          const moved = this.dragMoved;
+          this.draggingVertex = null;
+          if (moved) {
+            this.updateStatus();
+            this.onChange();
+          }
+        }
+      };
+      this.svg.addEventListener("pointerup", endDrag);
+      this.svg.addEventListener("pointercancel", endDrag);
+
+      this.svg.addEventListener("click", (event) => {
+        if (this.dragMoved) {
+          this.dragMoved = false;
+          return;
+        }
+        const vertexEl = event.target.closest("[data-builder-vertex]");
+        const edgeEl = event.target.closest("[data-builder-edge]");
+
+        if (this.tool === "vertex") {
+          if (vertexEl) return;
+          if (this.vertices.length >= 16) return;
+          const pt = this.svgCoords(event);
+          const x = clamp(pt.x, 68, 732);
+          const y = clamp(pt.y, 66, 534);
+          if (this.vertices.some((v) => Math.hypot(v.x - x, v.y - y) < 38)) return;
+          this.vertices.push({ id: this.vertices.length, x, y });
+          this.notifyChange();
+        } else if (this.tool === "edge") {
+          if (!vertexEl) {
+            this.selectedVertex = null;
+            this.render();
+            return;
+          }
+          const id = Number(vertexEl.dataset.builderVertex);
+          if (this.selectedVertex === null) {
+            this.selectedVertex = id;
+            this.render();
+          } else if (this.selectedVertex === id) {
+            this.selectedVertex = null;
+            this.render();
+          } else {
+            this.toggleEdge(this.selectedVertex, id);
+            this.selectedVertex = null;
+            this.notifyChange();
+          }
+        } else if (this.tool === "delete") {
+          if (vertexEl) {
+            this.deleteVertex(Number(vertexEl.dataset.builderVertex));
+            this.notifyChange();
+          } else if (edgeEl) {
+            const [a, b] = edgeEl.dataset.builderEdge.split("-").map(Number);
+            this.edges = this.edges.filter((e) => edgeKey(e.a, e.b) !== edgeKey(a, b));
+            this.notifyChange();
+          }
+        }
+      });
+    }
+
+    setTool(tool) {
+      this.tool = tool;
+      this.selectedVertex = null;
+      this.svg.dataset.tool = tool;
+      document.querySelectorAll("[data-builder-tool]").forEach((btn) => {
+        btn.classList.toggle("is-active", btn.dataset.builderTool === tool);
+      });
+      const hints = {
+        vertex: "Click empty space to add a vertex (max 16). Drag any vertex to reposition.",
+        edge: "Click two vertices in sequence to add or remove an edge between them.",
+        delete: "Click any vertex or edge to remove it."
+      };
+      $("builder-hint").textContent = hints[tool];
+      this.render();
+    }
+
+    toggleEdge(a, b) {
+      if (a === b) return;
+      const key = edgeKey(a, b);
+      const exists = this.edges.some((e) => edgeKey(e.a, e.b) === key);
+      if (exists) {
+        this.edges = this.edges.filter((e) => edgeKey(e.a, e.b) !== key);
+      } else {
+        this.edges.push({ a: Math.min(a, b), b: Math.max(a, b) });
+      }
+    }
+
+    deleteVertex(id) {
+      this.vertices.splice(id, 1);
+      this.vertices.forEach((v, index) => { v.id = index; });
+      this.edges = this.edges
+        .filter((e) => e.a !== id && e.b !== id)
+        .map((e) => ({
+          a: e.a > id ? e.a - 1 : e.a,
+          b: e.b > id ? e.b - 1 : e.b
+        }));
+      this.selectedVertex = null;
+    }
+
+    clear() {
+      this.vertices = [];
+      this.edges = [];
+      this.selectedVertex = null;
+      this.notifyChange();
+    }
+
+    loadSample() {
+      const cx = 400;
+      const cy = 300;
+      const rx = 240;
+      const ry = 175;
+      this.vertices = Array.from({ length: 6 }, (_, id) => {
+        const angle = -Math.PI / 2 + (id / 6) * Math.PI * 2;
+        return {
+          id,
+          x: Math.round(cx + rx * Math.cos(angle)),
+          y: Math.round(cy + ry * Math.sin(angle))
+        };
+      });
+      this.edges = [
+        { a: 0, b: 1 }, { a: 1, b: 2 }, { a: 2, b: 3 },
+        { a: 3, b: 4 }, { a: 4, b: 5 }, { a: 5, b: 0 },
+        { a: 0, b: 3 }, { a: 1, b: 4 }
+      ];
+      this.selectedVertex = null;
+      this.setTool(this.tool);
+      this.notifyChange();
+    }
+
+    buildGraph() {
+      const n = this.vertices.length;
+      const graph = GraphGenerator.emptyGraph(n, "custom");
+      this.vertices.forEach((v, id) => {
+        graph.vertices[id].x = v.x;
+        graph.vertices[id].y = v.y;
+      });
+      for (const e of this.edges) GraphGenerator.addEdge(graph, e.a, e.b);
+      return GraphGenerator.finalize(graph);
+    }
+
+    validate() {
+      const n = this.vertices.length;
+      if (n < 3) {
+        return { valid: false, message: "Add at least 3 vertices to build a playable custom graph." };
+      }
+      if (n > 16) {
+        return { valid: false, message: "Custom graphs support up to 16 vertices." };
+      }
+      const graph = this.buildGraph();
+      if (!GraphAnalyzer.isConnected(graph)) {
+        return { valid: false, message: "Connect all vertices into a single connected graph." };
+      }
+      return { valid: true, message: "" };
+    }
+
+    updateStatus() {
+      const n = this.vertices.length;
+      const m = this.edges.length;
+      $("builder-counts").textContent = `${n} V · ${m} E`;
+      const pill = $("builder-connectivity");
+      if (n < 3) {
+        pill.textContent = "Need 3+ vertices";
+        pill.className = "builder-pill is-invalid";
+        return;
+      }
+      const graph = this.buildGraph();
+      const connected = GraphAnalyzer.isConnected(graph);
+      if (!connected) {
+        pill.textContent = "Disconnected";
+        pill.className = "builder-pill is-invalid";
+        return;
+      }
+      const planar = GraphAnalyzer.isPlanarDrawing(graph);
+      pill.textContent = planar ? "Connected · Planar" : "Connected · Non-planar";
+      pill.className = "builder-pill is-valid";
+    }
+
+    notifyChange() {
+      this.render();
+      this.updateStatus();
+      this.onChange();
+    }
+
+    render() {
+      this.svg.replaceChildren();
+      const edgesGroup = this.element("g");
+      const nodesGroup = this.element("g");
+      this.svg.append(edgesGroup, nodesGroup);
+
+      if (!this.vertices.length) {
+        const label = this.element("text", { x: 400, y: 300, class: "builder-empty-label" });
+        label.textContent = "Click anywhere to place vertex 0";
+        nodesGroup.appendChild(label);
+        return;
+      }
+
+      for (const edge of this.edges) {
+        const a = this.vertices[edge.a];
+        const b = this.vertices[edge.b];
+        if (!a || !b) continue;
+        const g = this.element("g", {
+          class: "builder-edge-group",
+          "data-builder-edge": edgeKey(edge.a, edge.b)
+        });
+        g.appendChild(this.element("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: "builder-edge" }));
+        g.appendChild(this.element("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: "builder-edge-hit" }));
+        edgesGroup.appendChild(g);
+      }
+
+      for (const vertex of this.vertices) {
+        const classes = ["builder-vertex"];
+        if (vertex.id === this.selectedVertex) classes.push("is-selected");
+        const g = this.element("g", {
+          class: classes.join(" "),
+          transform: `translate(${vertex.x} ${vertex.y})`,
+          "data-builder-vertex": vertex.id
+        });
+        g.appendChild(this.element("circle", { class: "node-ring", r: 30 }));
+        g.appendChild(this.element("circle", { class: "node-circle", r: 22 }));
+        const label = this.element("text", { class: "vertex-label", y: 1 });
+        label.textContent = vertex.id;
+        g.appendChild(label);
+        nodesGroup.appendChild(g);
+      }
+    }
+  }
+
+  /* ================================================================
      5. Game state
      ================================================================ */
   class GameState {
@@ -823,7 +1118,8 @@
     startMatch(config, graph, seed) {
       this.session += 1;
       this.state = new GameState(config, graph, seed);
-      this.addHistory("graph", "Graph generated", `${graph.vertices.length} vertices · Seed ${seed}`);
+      const label = graph.type === "custom" ? "Custom graph loaded" : "Graph generated";
+      this.addHistory("graph", label, `${graph.vertices.length} vertices · Seed ${seed}`);
       this.notify("start");
       return this.state;
     }
@@ -897,7 +1193,6 @@
       const state = this.state;
       if (!state || state.head === null) return [];
       const occupied = state.occupied;
-      // When snake length is 2, moving into the tail is reversing directly across its single edge, which is disallowed
       const canMoveToTail = state.snakeBody.length > 2;
       return state.graph.adjacency[state.head].filter((vertex) => {
         const growing = vertex === state.apple;
@@ -999,7 +1294,6 @@
       const target = state.apple;
       if (start === target) return [start];
       const blocked = state.occupied;
-      // Only allow the tail vertex as a passable destination when snake length > 2
       if (state.tail !== target && state.snakeBody.length > 2) blocked.delete(state.tail);
       const parent = new Map([[start, null]]);
       const queue = [start];
@@ -1192,6 +1486,7 @@
       const role = engine.activeRole();
       const isSnake = role === "snake";
       const isComputer = engine.isComputerTurn();
+      const isCustom = state.graph.type === "custom";
       const turnCard = $("turn-card");
       turnCard.classList.toggle("is-snake", isSnake);
       turnCard.classList.toggle("is-computer", isComputer);
@@ -1235,6 +1530,8 @@
       $("board-hint").textContent = isComputer ? "Computer action in progress" : this.boardHint(state);
       $("pause-button").querySelector("span").textContent = state.phase === STATES.PAUSED ? "Resume match" : "Pause match";
       $("pause-button").disabled = state.phase === STATES.GAME_OVER;
+      $("new-graph-button").querySelector("span").textContent = isCustom ? "Edit custom graph" : "Generate new graph";
+      $("end-new-graph-button").textContent = isCustom ? "Edit custom graph" : "Generate new graph";
     }
 
     instruction(phase, computer) {
@@ -1297,6 +1594,7 @@
       this.renderer = new GraphRenderer($("graph-svg"), (vertex) => this.handleVertex(vertex));
       this.dashboard = new Dashboard();
       this.history = new HistoryManager();
+      this.customBuilder = new CustomGraphBuilder($("custom-graph-svg"), () => this.updateSetupValidation());
       this.config = null;
       this.graph = null;
       this.seed = "";
@@ -1355,8 +1653,9 @@
       const gameMode = document.querySelector('input[name="game-mode"]:checked').value;
       const graphMode = document.querySelector('input[name="graph-mode"]:checked').value;
       $("role-options").hidden = gameMode !== "hvc";
-      $("general-options").hidden = graphMode === "theta";
+      $("general-options").hidden = graphMode === "theta" || graphMode === "custom";
       $("theta-options").hidden = graphMode !== "theta";
+      $("custom-options").hidden = graphMode !== "custom";
       $("density-field").hidden = graphMode !== "general";
       this.updateThetaValidation();
       this.updateSetupValidation();
@@ -1394,6 +1693,10 @@
         const validation = GraphGenerator.validateTheta($("theta-p").value, $("theta-q").value, $("theta-r").value);
         valid = validation.valid;
         message = validation.valid ? "" : validation.message;
+      } else if (graphMode === "custom") {
+        const validation = this.customBuilder ? this.customBuilder.validate() : { valid: false, message: "" };
+        valid = validation.valid;
+        message = validation.valid ? "" : validation.message;
       } else {
         const count = Number($("vertex-count").value);
         valid = Number.isInteger(count) && count >= 6 && count <= 16;
@@ -1424,6 +1727,7 @@
     }
 
     createGraph(config, seed) {
+      if (config.graphMode === "custom") return this.customBuilder.buildGraph();
       const rng = new SeededRandom(`${seed}::graph`);
       if (config.graphMode === "general") return GraphGenerator.general(config.vertices, config.density, rng);
       if (config.graphMode === "research") return GraphGenerator.research(config.vertices, rng);
@@ -1471,7 +1775,7 @@
       $("game-screen").classList.remove("screen--active");
       $("home-screen").hidden = false;
       $("home-screen").classList.add("screen--active");
-      $("setup-error").textContent = "";
+      this.updateSetupValidation();
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
@@ -1490,6 +1794,11 @@
 
     generateNewGraph() {
       if (!this.config) return;
+      if (this.config.graphMode === "custom") {
+        this.returnHome();
+        this.showToast("Edit your custom graph and start a new match.");
+        return;
+      }
       this.cancelAI();
       const newSeed = createSeed();
       try {
@@ -1834,7 +2143,6 @@
       engine.state.snakeBody = [1, 2];
       engine.state.apple = 0;
       engine.state.phase = STATES.SNAKE_MOVE;
-      // Path 2 -> 1 -> 0 is blocked because snake has length 2 and cannot reverse into tail 1
       equal(SnakeAI.findPath(engine.state), null);
     });
 
